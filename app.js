@@ -138,39 +138,76 @@ function renderSteps(){
  const avg=Math.round(vals.reduce((s,x)=>s+x.n,0)/7);
  $('stepsAverage').textContent=`Rata-rata ${avg.toLocaleString('id-ID')}/hari`;
 }
-function countStep(){
- const now=Date.now();if(now-lastStepAt<320||!stepArmed)return;
- lastStepAt=now;stepArmed=false;setSteps(stepToday()+1);
+const stepWalk={active:false,paused:false,watch:null,last:null,distance:0,seconds:0,lastTick:0,route:[],timer:null};
+function renderStepWalk(){
+ const km=stepWalk.distance/1000,cal=Math.round((3.5-1)*3.5*weightNow()/200*(stepWalk.seconds/60));
+ $('stepWalkDistance').textContent=km.toFixed(2)+' km';
+ $('stepWalkTime').textContent=fmtTime(stepWalk.seconds);
+ $('stepWalkCalories').textContent=cal+' kkal';
+ $('stepWalkRoute').textContent=stepWalk.route.length+' titik GPS terekam';
 }
-function motionHandler(e){
- const a=e.accelerationIncludingGravity||e.acceleration;if(!a)return;
- const mag=Math.sqrt((a.x||0)**2+(a.y||0)**2+(a.z||0)**2);
- const delta=Math.abs(mag-lastMagnitude);lastMagnitude=mag;
- if(delta>1.15&&delta<15)countStep();
- if(delta<0.35&&Date.now()-lastStepAt>250)stepArmed=true;
- if(Date.now()-lastStepAt>500)stepArmed=true;
+function stepGpsError(err){
+ const msg={1:'Izin lokasi ditolak. Izinkan lokasi untuk Chrome di Pengaturan Android.',2:'Lokasi belum ditemukan. Aktifkan GPS dan coba di area terbuka.',3:'GPS terlalu lama merespons. Coba lagi di area terbuka.'};
+ $('stepSensorStatus').textContent='GPS bermasalah';$('stepWalkRoute').textContent=msg[err.code]||'Gagal membaca GPS.';
+ stopStepWalk(false);
+}
+function onStepGps(pos){
+ const c=pos.coords,acc=c.accuracy||999;
+ $('stepWalkRoute').textContent='Akurasi GPS ±'+Math.round(acc)+' m • '+stepWalk.route.length+' titik';
+ if(acc>75)return;
+ const p={lat:c.latitude,lon:c.longitude,t:pos.timestamp};
+ if(stepWalk.last){
+  const rad=x=>x*Math.PI/180,R=6371000,dLat=rad(p.lat-stepWalk.last.lat),dLon=rad(p.lon-stepWalk.last.lon);
+  const a=Math.sin(dLat/2)**2+Math.cos(rad(stepWalk.last.lat))*Math.cos(rad(p.lat))*Math.sin(dLon/2)**2;
+  const m=2*R*Math.asin(Math.sqrt(a)),dt=(p.t-stepWalk.last.t)/1000,ms=dt>0?m/dt:Infinity;
+  if(m>=2&&dt>0&&ms<=4.5){stepWalk.distance+=m;stepWalk.route.push([p.lat,p.lon]);}
+ }else stepWalk.route.push([p.lat,p.lon]);
+ stepWalk.last=p;renderStepWalk();
+}
+function stopStepWalk(paused=true){
+ if(stepWalk.watch!==null&&navigator.geolocation)navigator.geolocation.clearWatch(stepWalk.watch);
+ stepWalk.watch=null;if(stepWalk.timer)clearInterval(stepWalk.timer);stepWalk.timer=null;
+ if(stepListener)window.removeEventListener('devicemotion',stepListener);
+ stepListener=null;stepActive=false;stepWalk.active=false;stepWalk.paused=paused;
+ $('startSteps').disabled=false;$('stopSteps').disabled=true;
+ $('stepSensorStatus').textContent=paused?'Dijeda':'Berhenti';
+ $('startSteps').textContent=paused?'Lanjutkan aktivitas':'Mulai aktivitas';
+ renderStepWalk();
 }
 async function startStepSensor(){
- if(!('DeviceMotionEvent'in window)){$('stepSensorStatus').textContent='Sensor tidak tersedia';return}
+ if(!window.isSecureContext){$('stepSensorStatus').textContent='Butuh HTTPS';$('stepWalkRoute').textContent='Buka FitTrack melalui alamat HTTPS.';return}
+ if(!navigator.geolocation){$('stepSensorStatus').textContent='GPS tidak tersedia';return}
+ if(!('DeviceMotionEvent'in window)){$('stepSensorStatus').textContent='Sensor gerak tidak tersedia';return}
  try{
   if(typeof DeviceMotionEvent.requestPermission==='function'){
    const permission=await DeviceMotionEvent.requestPermission();
-   if(permission!=='granted')throw new Error('Izin sensor ditolak');
+   if(permission!=='granted')throw new Error('Izin sensor gerak ditolak.');
   }
-  if(stepListener)window.removeEventListener('devicemotion',stepListener);
+  if(!stepWalk.paused){stepWalk.distance=0;stepWalk.seconds=0;stepWalk.route=[];stepWalk.last=null}
+  lastMagnitude=0;stepArmed=true;
   stepListener=motionHandler;window.addEventListener('devicemotion',stepListener);
-  stepActive=true;$('startSteps').disabled=true;$('stopSteps').disabled=false;
-  $('stepSensorStatus').textContent='Sensor aktif';
- }catch(err){$('stepSensorStatus').textContent='Izin diperlukan';$('stepsGoalText').textContent=err.message||'Izinkan akses sensor gerak pada perangkat.'}
+  stepActive=true;stepWalk.active=true;stepWalk.paused=false;stepWalk.last=null;stepWalk.lastTick=Date.now();
+  $('startSteps').disabled=true;$('stopSteps').disabled=false;$('stepSensorStatus').textContent='Meminta izin GPS…';
+  stepWalk.watch=navigator.geolocation.watchPosition(onStepGps,stepGpsError,{enableHighAccuracy:true,maximumAge:0,timeout:45000});
+  stepWalk.timer=setInterval(()=>{if(stepWalk.active){const now=Date.now();stepWalk.seconds+=Math.max(0,Math.round((now-stepWalk.lastTick)/1000));stepWalk.lastTick=now;renderStepWalk()}},1000);
+  $('stepSensorStatus').textContent='Sensor & GPS aktif';
+ }catch(err){$('stepSensorStatus').textContent='Izin diperlukan';$('stepWalkRoute').textContent=err.message||'Izinkan sensor gerak.'}
 }
-function stopStepSensor(){
- if(stepListener)window.removeEventListener('devicemotion',stepListener);
- stepListener=null;stepActive=false;$('startSteps').disabled=false;$('stopSteps').disabled=true;
- $('stepSensorStatus').textContent='Dijeda';
-}
-$('startSteps').onclick=startStepSensor;$('stopSteps').onclick=stopStepSensor;
+$('startSteps').onclick=startStepSensor;$('stopSteps').onclick=()=>stopStepWalk(true);
 $('manualStepsForm').onsubmit=e=>{e.preventDefault();const add=Number($('manualSteps').value);if(Number.isFinite(add)&&add>0)setSteps(stepToday()+add);e.target.reset()};
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&stepActive)stopStepSensor()});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&stepWalk.active)stopStepWalk(true)});
+$('finishSteps').onclick=()=>{
+ if(stepWalk.active)stopStepWalk(false);
+ if(stepWalk.seconds<15&&stepWalk.distance<10){$('stepSensorStatus').textContent='Aktivitas terlalu singkat';return}
+ const km=stepWalk.distance/1000,cal=Math.round((3.5-1)*3.5*weightNow()/200*(stepWalk.seconds/60));
+ data.walks=data.walks||[];
+ data.walks.unshift({date:todayKey,steps:stepToday(),distance:+km.toFixed(3),seconds:stepWalk.seconds,calories:cal,route:stepWalk.route});
+ save();$('stepWalkRoute').textContent='Aktivitas tersimpan • '+stepWalk.route.length+' titik GPS';
+ stepWalk.paused=false;stepWalk.distance=0;stepWalk.seconds=0;stepWalk.route=[];stepWalk.last=null;
+ $('startSteps').textContent='Mulai aktivitas';$('finishSteps').disabled=true;renderStepWalk();
+};
+$('startSteps').addEventListener('click',()=>{$('finishSteps').disabled=false});
+renderStepWalk();
 renderSteps();
 
 renderWorkouts();renderFoods();renderWeights();renderRun();renderRunHistory();
