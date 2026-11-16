@@ -167,5 +167,6 @@ $('startSteps').onclick=startStepSensor;$('stopSteps').onclick=stopStepSensor;
 $('manualStepsForm').onsubmit=e=>{e.preventDefault();const add=Number($('manualSteps').value);if(Number.isFinite(add)&&add>0)setSteps(stepToday()+add);e.target.reset()};
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&stepActive)stopStepSensor()});
 renderSteps();
-\nrenderWorkouts();renderFoods();renderWeights();renderRun();renderRunHistory();
+
+renderWorkouts();renderFoods();renderWeights();renderRun();renderRunHistory();
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
