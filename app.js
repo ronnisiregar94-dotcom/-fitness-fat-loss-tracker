@@ -10,8 +10,15 @@ if(data.foodDay!==todayKey){data.foods=[];data.foodDay=todayKey}
 if(!Array.isArray(data.runs))data.runs=[];
 const save=()=>localStorage.setItem(KEY,JSON.stringify(data));
 const week=[['Senin','Lower body A','Goblet squat • RDL • Reverse lunge'],['Selasa','Kardio','Jalan cepat 25–30 menit'],['Rabu','Upper body + core','Dumbbell row • Shoulder press • Plank'],['Kamis','Kardio','Jalan cepat atau sepeda statis'],['Jumat','Lower body B','Glute bridge • Sumo squat • RDL'],['Sabtu','Kardio ringan','Jalan santai hingga cepat'],['Minggu','Pemulihan','Istirahat dan mobilitas ringan']];
+const programPlans={
+ fatloss:week,
+ '5k':[['Senin','Lari mudah','Lari santai 20–25 menit'],['Selasa','Kekuatan','Latihan kaki dan core 20 menit'],['Rabu','Interval ringan','Lari 1 menit • jalan 2 menit, ulang 6 kali'],['Kamis','Pemulihan','Jalan santai dan peregangan'],['Jumat','Lari mudah','Lari santai 25–30 menit'],['Sabtu','Jalan aktif','Jalan cepat 30 menit'],['Minggu','Istirahat','Pemulihan penuh']],
+ '10k':[['Senin','Lari mudah','Lari santai 25–30 menit'],['Selasa','Kekuatan','Latihan kaki dan core 25 menit'],['Rabu','Tempo ringan','Lari nyaman agak cepat 15–20 menit'],['Kamis','Pemulihan','Jalan santai dan peregangan'],['Jumat','Lari mudah','Lari santai 30–35 menit'],['Sabtu','Lari jarak panjang','Lari mudah 40–50 menit sesuai kemampuan'],['Minggu','Istirahat','Pemulihan penuh']],
+ steps:[['Senin','Target langkah','Capai 8.000 langkah'],['Selasa','Jalan aktif','Capai 8.000 langkah'],['Rabu','Jalan aktif','Capai 9.000 langkah'],['Kamis','Jalan aktif','Capai 8.000 langkah'],['Jumat','Jalan aktif','Capai 9.000 langkah'],['Sabtu','Jalan panjang','Capai 10.000 langkah'],['Minggu','Pemulihan','Jalan santai sesuai kondisi']]
+};
 function renderWorkouts(){
- $('workoutList').innerHTML=week.map(([day,name,desc])=>{const k=weekKey+'-'+day;return `<label class="workout ${data.workouts[k]?'done':''}"><input type="checkbox" data-key="${k}" ${data.workouts[k]?'checked':''}><div><b>${day} — ${name}</b><small>${desc}</small></div></label>`}).join('');
+ const plan=programPlans[data.program]||week;
+ $('workoutList').innerHTML=plan.map(([day,name,desc])=>{const k=weekKey+'-'+day;return `<label class="workout ${data.workouts[k]?'done':''}"><input type="checkbox" data-key="${k}" ${data.workouts[k]?'checked':''}><div><b>${day} — ${name}</b><small>${desc}</small></div></label>`}).join('');
  document.querySelectorAll('.workout input').forEach(x=>x.onchange=()=>{data.workouts[x.dataset.key]=x.checked;save();renderWorkouts()});
 }
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -107,7 +114,7 @@ const programDescriptions={fatloss:'Program kombinasi latihan beban, kardio, nut
 const programSelect=$('programSelect');
 programSelect.value=data.program||'fatloss';
 $('programDescription').textContent=programDescriptions[programSelect.value];
-programSelect.onchange=()=>{data.program=programSelect.value;save();$('programDescription').textContent=programDescriptions[data.program]};
+programSelect.onchange=()=>{data.program=programSelect.value;save();$('programDescription').textContent=programDescriptions[data.program];renderWorkouts()};
 if(!data.program)data.program='fatloss';
 
 /* Daily step counter: motion sensor while page is active + manual health-app entry */
