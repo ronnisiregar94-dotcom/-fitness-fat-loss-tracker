@@ -101,5 +101,64 @@ function renderRunHistory(){
  $('runHistory').innerHTML=data.runs.slice(0,8).map(x=>`<li><span>${new Date(x.date+'T00:00:00').toLocaleDateString('id-ID',{day:'numeric',month:'short'})} • ${x.distance.toFixed(2)} km</span><span>${fmtTime(x.seconds)} • ${x.calories} kkal</span></li>`).join('')||'<li>Belum ada aktivitas lari.</li>';
 }
 document.querySelectorAll('.target-btn').forEach(b=>b.onclick=()=>{if(run.active||run.paused)return;run.target=+b.dataset.target;document.querySelectorAll('.target-btn').forEach(x=>x.classList.toggle('selected',x===b));renderRun()});
-renderWorkouts();renderFoods();renderWeights();renderRun();renderRunHistory();
+
+/* Program selector */
+const programDescriptions={fatloss:'Program kombinasi latihan beban, kardio, nutrisi, dan pemantauan berat badan.','5k':'Program fokus membangun daya tahan untuk mencapai target lari 5 KM.','10k':'Program bertahap untuk meningkatkan daya tahan menuju target lari 10 KM.',steps:'Program meningkatkan aktivitas harian melalui target langkah dan pemantauan tren.'};
+const programSelect=$('programSelect');
+programSelect.value=data.program||'fatloss';
+$('programDescription').textContent=programDescriptions[programSelect.value];
+programSelect.onchange=()=>{data.program=programSelect.value;save();$('programDescription').textContent=programDescriptions[data.program]};
+if(!data.program)data.program='fatloss';
+
+/* Daily step counter: motion sensor while page is active + manual health-app entry */
+if(!data.stepLogs||typeof data.stepLogs!=='object')data.stepLogs={};
+const STEP_GOAL=8000;
+let stepActive=false,lastStepAt=0,stepListener=null,lastMagnitude=0,stepArmed=true;
+function stepToday(){return data.stepLogs[todayKey]||0}
+function setSteps(n){data.stepLogs[todayKey]=Math.max(0,Math.round(n));save();renderSteps()}
+function renderSteps(){
+ const n=stepToday();$('stepsToday').textContent=n.toLocaleString('id-ID');
+ $('stepsProgressBar').style.width=Math.min(100,n/STEP_GOAL*100)+'%';
+ $('stepsGoalText').textContent=n>=STEP_GOAL?'Target 8.000 langkah tercapai!':`Target 8.000 langkah • kurang ${(STEP_GOAL-n).toLocaleString('id-ID')} langkah`;
+ const vals=[];for(let i=6;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const key=localDate(d);vals.push({key,label:d.toLocaleDateString('id-ID',{weekday:'short'}),n:data.stepLogs[key]||0})}
+ const max=Math.max(STEP_GOAL,...vals.map(x=>x.n),1);
+ $('stepsChart').innerHTML=vals.map(x=>`<div class="steps-col"><b>${x.n?x.n.toLocaleString('id-ID'):''}</b><i style="height:${Math.max(3,x.n/max*100)}%"></i><small>${x.label}</small></div>`).join('');
+ const avg=Math.round(vals.reduce((s,x)=>s+x.n,0)/7);
+ $('stepsAverage').textContent=`Rata-rata ${avg.toLocaleString('id-ID')}/hari`;
+}
+function countStep(){
+ const now=Date.now();if(now-lastStepAt<320||!stepArmed)return;
+ lastStepAt=now;stepArmed=false;setSteps(stepToday()+1);
+}
+function motionHandler(e){
+ const a=e.accelerationIncludingGravity||e.acceleration;if(!a)return;
+ const mag=Math.sqrt((a.x||0)**2+(a.y||0)**2+(a.z||0)**2);
+ const delta=Math.abs(mag-lastMagnitude);lastMagnitude=mag;
+ if(delta>1.15&&delta<15)countStep();
+ if(delta<0.35&&Date.now()-lastStepAt>250)stepArmed=true;
+ if(Date.now()-lastStepAt>500)stepArmed=true;
+}
+async function startStepSensor(){
+ if(!('DeviceMotionEvent'in window)){$('stepSensorStatus').textContent='Sensor tidak tersedia';return}
+ try{
+  if(typeof DeviceMotionEvent.requestPermission==='function'){
+   const permission=await DeviceMotionEvent.requestPermission();
+   if(permission!=='granted')throw new Error('Izin sensor ditolak');
+  }
+  if(stepListener)window.removeEventListener('devicemotion',stepListener);
+  stepListener=motionHandler;window.addEventListener('devicemotion',stepListener);
+  stepActive=true;$('startSteps').disabled=true;$('stopSteps').disabled=false;
+  $('stepSensorStatus').textContent='Sensor aktif';
+ }catch(err){$('stepSensorStatus').textContent='Izin diperlukan';$('stepsGoalText').textContent=err.message||'Izinkan akses sensor gerak pada perangkat.'}
+}
+function stopStepSensor(){
+ if(stepListener)window.removeEventListener('devicemotion',stepListener);
+ stepListener=null;stepActive=false;$('startSteps').disabled=false;$('stopSteps').disabled=true;
+ $('stepSensorStatus').textContent='Dijeda';
+}
+$('startSteps').onclick=startStepSensor;$('stopSteps').onclick=stopStepSensor;
+$('manualStepsForm').onsubmit=e=>{e.preventDefault();const add=Number($('manualSteps').value);if(Number.isFinite(add)&&add>0)setSteps(stepToday()+add);e.target.reset()};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&stepActive)stopStepSensor()});
+renderSteps();
+\nrenderWorkouts();renderFoods();renderWeights();renderRun();renderRunHistory();
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
