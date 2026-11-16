@@ -4,9 +4,10 @@ const today=new Date(), todayKey=localDate(today);
 $('today').textContent=today.toLocaleDateString('id-ID',{day:'numeric',month:'short'});
 const KEY='fittrack-v1';
 const monday=new Date(today); monday.setDate(today.getDate()-((today.getDay()+6)%7)); const weekKey=localDate(monday);
-const defaults={foods:[],foodDay:todayKey,weights:[{date:localDate(new Date(today.getTime()-604800000)),value:90}],workouts:{},measurements:[]};
+const defaults={foods:[],foodDay:todayKey,weights:[{date:localDate(new Date(today.getTime()-604800000)),value:90}],workouts:{},measurements:[],runs:[]};
 let data; try{data={...defaults,...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch{data={...defaults}}
 if(data.foodDay!==todayKey){data.foods=[];data.foodDay=todayKey}
+if(!Array.isArray(data.runs))data.runs=[];
 const save=()=>localStorage.setItem(KEY,JSON.stringify(data));
 const week=[['Senin','Lower body A','Goblet squat • RDL • Reverse lunge'],['Selasa','Kardio','Jalan cepat 25–30 menit'],['Rabu','Upper body + core','Dumbbell row • Shoulder press • Plank'],['Kamis','Kardio','Jalan cepat atau sepeda statis'],['Jumat','Lower body B','Glute bridge • Sumo squat • RDL'],['Sabtu','Kardio ringan','Jalan santai hingga cepat'],['Minggu','Pemulihan','Istirahat dan mobilitas ringan']];
 function renderWorkouts(){
@@ -14,10 +15,13 @@ function renderWorkouts(){
  document.querySelectorAll('.workout input').forEach(x=>x.onchange=()=>{data.workouts[x.dataset.key]=x.checked;save();renderWorkouts()});
 }
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function weightNow(){return data.weights.at(-1)?.value||90}
 function renderFoods(){
  const c=data.foods.reduce((s,x)=>s+x.cal,0),p=data.foods.reduce((s,x)=>s+x.pro,0);
+ const burned=data.runs.filter(x=>x.date===todayKey).reduce((s,x)=>s+(x.calories||0),0);
  $('calorieTotal').textContent=c.toLocaleString('id-ID'); $('proteinTotal').textContent=`${p} / 150 g`;
  $('calorieRemaining').textContent=`${Math.max(0,2100-c).toLocaleString('id-ID')} kkal`;
+ $('exerciseCalories').textContent=`${Math.round(burned).toLocaleString('id-ID')} kkal`;
  $('proteinBar').style.width=Math.min(100,p/150*100)+'%';
  $('calorieRing').style.background=`conic-gradient(var(--lime) ${Math.min(100,c/2100*100)*3.6}deg,#2b394d 0deg)`;
  $('foodList').innerHTML=data.foods.map((x,i)=>`<li><span>${esc(x.name)}</span><span>${x.cal} kkal • ${x.pro} g <button data-del="${i}" aria-label="Hapus">×</button></span></li>`).join('');
@@ -31,5 +35,71 @@ function renderWeights(){
 }
 $('weightForm').onsubmit=e=>{e.preventDefault();data.weights.push({date:todayKey,value:+$('weightInput').value});data.weights.sort((a,b)=>a.date.localeCompare(b.date));save();e.target.reset();renderWeights()};
 $('measureForm').onsubmit=e=>{e.preventDefault();const m={date:todayKey,thigh:+$('thighInput').value||null,waist:+$('waistInput').value||null};data.measurements.push(m);save();$('measureSummary').textContent=`${m.date}: Lingkar paha ${m.thigh??'—'} cm • Pinggang ${m.waist??'—'} cm`;e.target.reset()};
-renderWorkouts();renderFoods();renderWeights();
+const run={target:5,distance:0,seconds:0,calories:0,watch:null,last:null,active:false,paused:false,startedAt:null,lastTick:0};
+let runTimer=null;
+function fmtTime(s){const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=s%60;return [h,m,sec].map(n=>String(n).padStart(2,'0')).join(':')}
+function activeCalories(km,seconds,kg){
+ if(km<=0||seconds<=0)return 0;
+ const speed=km/(seconds/3600);
+ const met=speed<6?6:speed<8?8.3:speed<10?9.8:speed<12?11:11.8;
+ return Math.round(Math.max(0,(met-1)*3.5*kg/200*(seconds/60)));
+}
+function renderRun(){
+ const km=run.distance/1000,pace=km>0&&run.seconds>0?Math.round(run.seconds/km):0,speed=run.seconds>0?km/(run.seconds/3600):0;
+ $('runDistance').textContent=km.toFixed(2);$('runProgress').textContent=`${Math.min(100,km/run.target*100).toFixed(0)}% dari target ${run.target} km`;
+ $('runProgressBar').style.width=Math.min(100,km/run.target*100)+'%';$('runTime').textContent=fmtTime(run.seconds);
+ $('runPace').textContent=pace? `${String(Math.floor(pace/60)).padStart(2,'0')}:${String(pace%60).padStart(2,'0')} /km`:'--:-- /km';
+ $('runSpeed').textContent=`${speed.toFixed(1)} km/j`;$('runCalories').textContent=`${activeCalories(km,run.seconds,weightNow())} kkal`;
+}
+function setGps(s){$('gpsStatus').textContent=s}
+function positionError(err){setGps('GPS bermasalah');$('gpsAccuracy').textContent=err.code===1?'Izin lokasi ditolak. Aktifkan izin lokasi untuk browser di pengaturan HP.':err.code===2?'Sinyal lokasi belum tersedia. Coba di area terbuka.':'GPS terlalu lama merespons. Pastikan lokasi HP aktif.'}
+function onPosition(pos){
+ const c=pos.coords,acc=c.accuracy||999;
+ $('gpsAccuracy').textContent=`Akurasi GPS ±${Math.round(acc)} meter`;
+ if(acc>35){setGps('Mencari GPS akurat…');return}
+ setGps('GPS terkunci');
+ const point={lat:c.latitude,lon:c.longitude,t:pos.timestamp,acc};
+ if(run.last){
+  const rad=x=>x*Math.PI/180,R=6371000;
+  const dLat=rad(point.lat-run.last.lat),dLon=rad(point.lon-run.last.lon);
+  const a=Math.sin(dLat/2)**2+Math.cos(rad(run.last.lat))*Math.cos(rad(point.lat))*Math.sin(dLon/2)**2;
+  const meters=2*R*Math.asin(Math.sqrt(a)),dt=(point.t-run.last.t)/1000,ms=dt>0?meters/dt:Infinity;
+  if(meters>=2&&dt>0&&ms<=7.0)run.distance+=meters;
+  if(meters<2&&dt>0){} 
+ }
+ run.last=point;renderRun();
+ if(run.distance/1000>=run.target){pauseRun();setGps('Target tercapai');$('gpsAccuracy').textContent='Target jarak tercapai. Tekan Selesai untuk menyimpan hasil.'}
+}
+function startWatch(){
+ if(!navigator.geolocation){setGps('GPS tidak didukung');return}
+ run.active=true;run.paused=false;run.last=null;run.lastTick=Date.now();
+ $('startRun').disabled=true;$('pauseRun').disabled=false;$('finishRun').disabled=false;setGps('Mencari sinyal GPS…');
+ run.watch=navigator.geolocation.watchPosition(onPosition,positionError,{enableHighAccuracy:true,maximumAge:0,timeout:20000});
+ runTimer=setInterval(()=>{if(run.active){const now=Date.now();run.seconds+=Math.max(0,Math.round((now-run.lastTick)/1000));run.lastTick=now;renderRun()}},1000);
+}
+function pauseRun(){
+ if(!run.active)return;
+ run.active=false;run.paused=true;if(run.watch!==null)navigator.geolocation.clearWatch(run.watch);run.watch=null;
+ if(runTimer)clearInterval(runTimer);runTimer=null;run.last=null;$('startRun').disabled=false;$('startRun').textContent='Lanjutkan';$('pauseRun').disabled=true;setGps('Dijeda');
+}
+$('startRun').onclick=()=>{
+ if(!window.isSecureContext){setGps('Butuh koneksi HTTPS');$('gpsAccuracy').textContent='Buka aplikasi melalui alamat GitHub Pages HTTPS.';return}
+ if(!navigator.geolocation){setGps('GPS tidak didukung');return}
+ if(!run.active&&!run.paused){run.distance=0;run.seconds=0;run.last=null;$('startRun').textContent='Lanjutkan';}
+ startWatch();
+};
+$('pauseRun').onclick=pauseRun;
+$('finishRun').onclick=()=>{
+ if(run.active)pauseRun();
+ if(run.distance<20&&run.seconds<30){setGps('Sesi terlalu singkat');return}
+ const km=run.distance/1000,cal=activeCalories(km,run.seconds,weightNow());
+ data.runs.unshift({date:todayKey,distance:+km.toFixed(3),seconds:run.seconds,calories:cal,pace:km>0?Math.round(run.seconds/km):0,target:run.target});
+ save();renderRunHistory();renderFoods();resetRun();setGps('Lari tersimpan');
+};
+function resetRun(){run.distance=0;run.seconds=0;run.last=null;run.paused=false;run.active=false;$('startRun').textContent='Mulai lari';$('startRun').disabled=false;$('pauseRun').disabled=true;$('finishRun').disabled=true;renderRun()}
+function renderRunHistory(){
+ $('runHistory').innerHTML=data.runs.slice(0,8).map(x=>`<li><span>${new Date(x.date+'T00:00:00').toLocaleDateString('id-ID',{day:'numeric',month:'short'})} • ${x.distance.toFixed(2)} km</span><span>${fmtTime(x.seconds)} • ${x.calories} kkal</span></li>`).join('')||'<li>Belum ada aktivitas lari.</li>';
+}
+document.querySelectorAll('.target-btn').forEach(b=>b.onclick=()=>{if(run.active||run.paused)return;run.target=+b.dataset.target;document.querySelectorAll('.target-btn').forEach(x=>x.classList.toggle('selected',x===b));renderRun()});
+renderWorkouts();renderFoods();renderWeights();renderRun();renderRunHistory();
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
