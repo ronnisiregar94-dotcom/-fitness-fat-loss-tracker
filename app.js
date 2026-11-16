@@ -59,29 +59,32 @@ function renderRun(){
  $('runSpeed').textContent=`${speed.toFixed(1)} km/j`;$('runCalories').textContent=`${activeCalories(km,run.seconds,weightNow())} kkal`;
 }
 function setGps(s){$('gpsStatus').textContent=s}
-function positionError(err){setGps('GPS bermasalah');$('gpsAccuracy').textContent=err.code===1?'Izin lokasi ditolak. Aktifkan izin lokasi untuk browser di pengaturan HP.':err.code===2?'Sinyal lokasi belum tersedia. Coba di area terbuka.':'GPS terlalu lama merespons. Pastikan lokasi HP aktif.'}
+function positionError(err){
+ const messages={1:'Izin lokasi ditolak. Aktifkan izin lokasi untuk Chrome: Pengaturan HP → Aplikasi → Chrome → Izin → Lokasi. Pilih Izinkan saat aplikasi digunakan.',2:'Lokasi belum ditemukan. Aktifkan Lokasi/GPS HP, pilih akurasi tinggi, lalu coba di area terbuka.',3:'GPS belum merespons. Tunggu di area terbuka, pastikan mode hemat baterai tidak membatasi lokasi, lalu coba lagi.'};
+ setGps('GPS bermasalah');$('gpsAccuracy').textContent=messages[err.code]||'Gagal membaca GPS. Periksa pengaturan lokasi HP.';
+ if(run.active){run.active=false;if(run.watch!==null)navigator.geolocation.clearWatch(run.watch);run.watch=null;if(runTimer)clearInterval(runTimer);runTimer=null;$('startRun').disabled=false;$('pauseRun').disabled=true;$('startRun').textContent='Coba lagi';}
+}
 function onPosition(pos){
  const c=pos.coords,acc=c.accuracy||999;
  $('gpsAccuracy').textContent=`Akurasi GPS ±${Math.round(acc)} meter`;
- if(acc>35){setGps('Mencari GPS akurat…');return}
- setGps('GPS terkunci');
+ if(acc>75){setGps('Menunggu sinyal GPS lebih baik…');return}
+ setGps('GPS aktif • merekam');
  const point={lat:c.latitude,lon:c.longitude,t:pos.timestamp,acc};
  if(run.last){
   const rad=x=>x*Math.PI/180,R=6371000;
   const dLat=rad(point.lat-run.last.lat),dLon=rad(point.lon-run.last.lon);
   const a=Math.sin(dLat/2)**2+Math.cos(rad(run.last.lat))*Math.cos(rad(point.lat))*Math.sin(dLon/2)**2;
   const meters=2*R*Math.asin(Math.sqrt(a)),dt=(point.t-run.last.t)/1000,ms=dt>0?meters/dt:Infinity;
-  if(meters>=2&&dt>0&&ms<=7.0)run.distance+=meters;
-  if(meters<2&&dt>0){} 
+  if(meters>=2&&dt>0&&ms<=10)run.distance+=meters;
  }
  run.last=point;renderRun();
  if(run.distance/1000>=run.target){pauseRun();setGps('Target tercapai');$('gpsAccuracy').textContent='Target jarak tercapai. Tekan Selesai untuk menyimpan hasil.'}
 }
 function startWatch(){
- if(!navigator.geolocation){setGps('GPS tidak didukung');return}
+ if(!navigator.geolocation){setGps('GPS tidak didukung');$('gpsAccuracy').textContent='Browser ini tidak menyediakan GPS. Gunakan Chrome terbaru di Android.';return}
  run.active=true;run.paused=false;run.last=null;run.lastTick=Date.now();
- $('startRun').disabled=true;$('pauseRun').disabled=false;$('finishRun').disabled=false;setGps('Mencari sinyal GPS…');
- run.watch=navigator.geolocation.watchPosition(onPosition,positionError,{enableHighAccuracy:true,maximumAge:0,timeout:20000});
+ $('startRun').disabled=true;$('pauseRun').disabled=false;$('finishRun').disabled=false;setGps('Meminta izin & mencari GPS…');
+ run.watch=navigator.geolocation.watchPosition(onPosition,positionError,{enableHighAccuracy:true,maximumAge:0,timeout:45000});
  runTimer=setInterval(()=>{if(run.active){const now=Date.now();run.seconds+=Math.max(0,Math.round((now-run.lastTick)/1000));run.lastTick=now;renderRun()}},1000);
 }
 function pauseRun(){
@@ -90,9 +93,11 @@ function pauseRun(){
  if(runTimer)clearInterval(runTimer);runTimer=null;run.last=null;$('startRun').disabled=false;$('startRun').textContent='Lanjutkan';$('pauseRun').disabled=true;setGps('Dijeda');
 }
 $('startRun').onclick=()=>{
- if(!window.isSecureContext){setGps('Butuh koneksi HTTPS');$('gpsAccuracy').textContent='Buka aplikasi melalui alamat GitHub Pages HTTPS.';return}
- if(!navigator.geolocation){setGps('GPS tidak didukung');return}
- if(!run.active&&!run.paused){run.distance=0;run.seconds=0;run.last=null;$('startRun').textContent='Lanjutkan';}
+ if(!window.isSecureContext){setGps('Butuh koneksi HTTPS');$('gpsAccuracy').textContent='Buka alamat GitHub Pages yang diawali https://.';return}
+ if(!navigator.geolocation){setGps('GPS tidak didukung');$('gpsAccuracy').textContent='Gunakan Chrome terbaru di Android dan aktifkan Lokasi HP.';return}
+ if(run.active)return;
+ if(!run.paused){run.distance=0;run.seconds=0;run.last=null;}
+ $('startRun').textContent='Mencari GPS…';
  startWatch();
 };
 $('pauseRun').onclick=pauseRun;
