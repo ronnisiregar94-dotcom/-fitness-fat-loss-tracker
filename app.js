@@ -65,6 +65,7 @@ function positionError(err){
  if(run.active){run.active=false;if(run.watch!==null)navigator.geolocation.clearWatch(run.watch);run.watch=null;if(runTimer)clearInterval(runTimer);runTimer=null;$('startRun').disabled=false;$('pauseRun').disabled=true;$('startRun').textContent='Coba lagi';}
 }
 function onPosition(pos){
+ if(!run.active)return;
  const c=pos.coords,acc=c.accuracy||999;
  $('gpsAccuracy').textContent=`Akurasi GPS ±${Math.round(acc)} meter`;
  if(acc>75){setGps('Menunggu sinyal GPS lebih baik…');return}
@@ -83,14 +84,23 @@ function onPosition(pos){
 function startWatch(){
  if(!navigator.geolocation){setGps('GPS tidak didukung');$('gpsAccuracy').textContent='Browser ini tidak menyediakan GPS. Gunakan Chrome terbaru di Android.';return}
  run.active=true;run.paused=false;run.last=null;run.lastTick=Date.now();
- $('startRun').disabled=true;$('pauseRun').disabled=false;$('finishRun').disabled=false;setGps('Meminta izin & mencari GPS…');
+ $('startRun').disabled=true;$('pauseRun').disabled=false;$('pauseRun').textContent='Jeda';$('finishRun').disabled=false;setGps('Meminta izin & mencari GPS…');
  run.watch=navigator.geolocation.watchPosition(onPosition,positionError,{enableHighAccuracy:true,maximumAge:0,timeout:45000});
  runTimer=setInterval(()=>{if(run.active){const now=Date.now();run.seconds+=Math.max(0,Math.round((now-run.lastTick)/1000));run.lastTick=now;renderRun()}},1000);
 }
 function pauseRun(){
  if(!run.active)return;
- run.active=false;run.paused=true;if(run.watch!==null)navigator.geolocation.clearWatch(run.watch);run.watch=null;
- if(runTimer)clearInterval(runTimer);runTimer=null;run.last=null;$('startRun').disabled=false;$('startRun').textContent='Lanjutkan';$('pauseRun').disabled=true;setGps('Dijeda');
+ // Freeze the session first so queued GPS callbacks cannot add distance after pause.
+ run.active=false;run.paused=true;
+ if(run.watch!==null&&navigator.geolocation)navigator.geolocation.clearWatch(run.watch);
+ run.watch=null;
+ if(runTimer!==null){clearInterval(runTimer);runTimer=null;}
+ run.last=null;
+ $('startRun').disabled=false;$('startRun').textContent='Lanjutkan';
+ $('pauseRun').disabled=true;$('pauseRun').textContent='Dijeda';
+ $('finishRun').disabled=false;
+ setGps('Aktivitas dijeda');$('gpsAccuracy').textContent='Timer dan perekaman GPS dihentikan sementara. Tekan Lanjutkan untuk meneruskan.';
+ renderRun();
 }
 $('startRun').onclick=()=>{
  if(!window.isSecureContext){setGps('Butuh koneksi HTTPS');$('gpsAccuracy').textContent='Buka alamat GitHub Pages yang diawali https://.';return}
@@ -100,7 +110,7 @@ $('startRun').onclick=()=>{
  $('startRun').textContent='Mencari GPS…';
  startWatch();
 };
-$('pauseRun').onclick=pauseRun;
+$('pauseRun').addEventListener('click',e=>{e.preventDefault();if(run.active)pauseRun()});
 $('finishRun').onclick=()=>{
  if(run.active)pauseRun();
  if(run.distance<20&&run.seconds<30){setGps('Sesi terlalu singkat');return}
@@ -108,7 +118,7 @@ $('finishRun').onclick=()=>{
  data.runs.unshift({date:todayKey,distance:+km.toFixed(3),seconds:run.seconds,calories:cal,pace:km>0?Math.round(run.seconds/km):0,target:run.target});
  save();renderRunHistory();renderFoods();resetRun();setGps('Lari tersimpan');
 };
-function resetRun(){run.distance=0;run.seconds=0;run.last=null;run.paused=false;run.active=false;$('startRun').textContent='Mulai lari';$('startRun').disabled=false;$('pauseRun').disabled=true;$('finishRun').disabled=true;renderRun()}
+function resetRun(){run.distance=0;run.seconds=0;run.last=null;run.paused=false;run.active=false;$('startRun').textContent='Mulai lari';$('startRun').disabled=false;$('pauseRun').disabled=true;$('pauseRun').textContent='Jeda';$('finishRun').disabled=true;renderRun()}
 function renderRunHistory(){
  $('runHistory').innerHTML=data.runs.slice(0,8).map(x=>`<li><span>${new Date(x.date+'T00:00:00').toLocaleDateString('id-ID',{day:'numeric',month:'short'})} • ${x.distance.toFixed(2)} km</span><span>${fmtTime(x.seconds)} • ${x.calories} kkal</span></li>`).join('')||'<li>Belum ada aktivitas lari.</li>';
 }
